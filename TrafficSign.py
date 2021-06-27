@@ -6,11 +6,15 @@ import math
 import numpy as np
 import cv2
 import keras
+from keras import Model
+from keras.applications import VGG16
 from keras.layers import Dense, Dropout, Flatten, Input
 from keras.layers import Conv2D, MaxPooling2D
 from keras.layers import BatchNormalization
 from keras.optimizers import Adam
 from keras.models import Sequential
+from sklearn.model_selection import train_test_split
+
 
 def load_data(input_size = (64,64), data_path =  'GTSRB/Final_Training/Images'):
 
@@ -59,68 +63,43 @@ def split_train_val_test_data(pixels, labels):
     X = pixels[randomize]
     print("X=", X.shape)
     y = labels[randomize]
+    X_train, X_test, y_train, y_test = train_test_split( X, y, test_size=0.25,train_size=0.75)
 
-    # Chia dữ liệu theo tỷ lệ 60% train và 40% còn lại cho val và test
-    train_size = int(X.shape[0] * 0.6)
-    X_train, X_val = X[:train_size], X[train_size:]
-    y_train, y_val = y[:train_size], y[train_size:]
-
-    val_size = int(X_val.shape[0] * 0.5) # 50% của phần 40% bên trên
-    X_val, X_test = X_val[:val_size], X_val[val_size:]
-    y_val, y_test = y_val[:val_size], y_val[val_size:]
-
-    return X_train, y_train, X_val, y_val, X_test, y_test
+    return X_train, y_train, X_test, y_test
 
 
-X_train, y_train, X_val, y_val, X_test, y_test = split_train_val_test_data(pixels, labels)
+X_train, y_train, X_test, y_test = split_train_val_test_data(pixels, labels)
 
 
-def build_model(input_shape=(64,64,3), filter_size = (3,3), pool_size = (2, 2), output_size = 43):
-    model = Sequential([
-        Conv2D(16, filter_size, activation='relu', input_shape=input_shape, padding='same'),
-        BatchNormalization(),
-        Conv2D(16, filter_size, activation='relu', padding='same'),
-        BatchNormalization(),
-        MaxPooling2D(pool_size=pool_size),
-        Dropout(0.2),
-        Conv2D(32, filter_size, activation='relu', padding='same'),
-        BatchNormalization(),
-        Conv2D(32, filter_size, activation='relu', padding='same'),
-        BatchNormalization(),
-        MaxPooling2D(pool_size=pool_size),
-        Dropout(0.2),
-        Conv2D(64, filter_size, activation='relu', padding='same'),
-        BatchNormalization(),
-        Conv2D(64, filter_size, activation='relu', padding='same'),
-        BatchNormalization(),
-        MaxPooling2D(pool_size=pool_size),
-        Dropout(0.2),
-        Flatten(),
-        Dense(2048, activation='relu'),
-        Dropout(0.3),
-        Dense(1024, activation='relu'),
-        Dropout(0.3),
-        Dense(128, activation='relu'),
-        Dropout(0.3),
-        Dense(output_size, activation='softmax')
-    ])
+def built_model():
+    model_vgg16_conv = VGG16(weights='imagenet', include_top=False)
+    # Dong bang cac layer
+    for layer in model_vgg16_conv.layers:
+        layer.trainable = False
+        # Tao model
+    input = Input(shape=(64, 64, 3), name='image_input')
+    output_vgg16_conv = model_vgg16_conv(input)
+    # Them cac layer FC va Dropout
+    x = Flatten(name='flatten')(output_vgg16_conv)  # dàn phẳng các bức ảnh thành mảng 1 chiều
+    x = Dense(4096, activation='relu', name='fc1')(x)  # lớp dense
+    x = Dropout(0.5)(x)  # giảm việc bị overfiting
+    x = Dense(4096, activation='relu', name='fc2')(x)
+    x = Dropout(0.5)(x)
+    x = Dense(4096, activation='relu', name='fc3')(x)
+    x = Dropout(0.5)(x)
+    x = Dense(43, activation='softmax', name='predictions')(x)
+    my_model = Model(inputs=input, outputs=x)
 
-    model.compile(loss='categorical_crossentropy', optimizer=Adam(lr=1e-4), metrics=['accuracy'])
-    model.summary()
-    return model
-
-# Build model với kích thước đầu vào 64x64 và output là 43 classes
-model = build_model(input_shape=(64,64,3), output_size=43)
-
+    my_model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    return my_model
+model = built_model()
 # Train model
-epochs = 10
+epochs = 5
 batch_size = 16
 
-model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size,
-                               validation_data=(X_val, y_val))
+model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size,validation_data=(X_test,y_test))
 
 model.save("traffic_sign_model.h5")
-#model = keras.models.load_model("traffic_sign_model.h5")
 
 # Kiểm tra model với dữ liệu mới
 print(model.evaluate(X_test, y_test))
